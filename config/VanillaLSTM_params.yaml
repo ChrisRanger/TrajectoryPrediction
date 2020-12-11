@@ -1,0 +1,50 @@
+Model:
+  Architecture: "VanillaLSTM"
+  Embedding:
+    Input_size: 128
+    Depth: 1
+  LSTMs:
+    Input_size: 128
+    Hidden_size: 128
+    Num_layer: 1
+  MLP:
+    MLP_dim: 1024
+    MLP_depth: 4
+  Activative_function: 'Relu'
+  Batch_norm: true
+
+Datasets:
+  Train: ("~/home/chris/predict_code/Prediction/datasets/eth/train",)
+  Test: ("~/home/chris/predict_code/Prediction/datasets/eth/test",)
+  Eval: ("~/home/chris/predict_code/Prediction/datasets/eth/val",)
+  Obs_len: 8
+  Pred_len: 8
+  # 按pedestrian喂数据(普通DL)，或按frame喂数据(用于GNN等帧预测)
+  Data_form: 'pedestrian'
+  # disable:剔除轨迹序列不够长的行人 enable:允许轨迹序列不够长
+  Obs_lack: 'disable'
+  shuffle: true
+  delim: '\t'
+  Batch_size: 8
+  # 轨迹特征向量尺寸, 一般为2即横纵坐标,某些数据集也有速度、偏航角、加速度等
+  Featuer_num: 2
+
+Loss:
+  Weight: 1
+
+Optimization:
+  Num_epochs: 8
+  lr_scheduler:
+    enable: true
+    lr_sh_rate: 0.9
+    Learning_rate: 1e-5
+
+
+
+Train:
+  Epoch: 1000
+  Model_dir: "./VanillaLSTM/"
+  Check_point_name: ""
+  Restore_from_checkpoint: false
+  infer: false
+  print: 5
