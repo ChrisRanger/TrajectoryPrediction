@@ -23,7 +23,6 @@ import random
 import logging
 from logging import handlers
 
-
 logging.info(torch.__version__)
 
 cfg = {
@@ -174,7 +173,7 @@ if __name__ == '__main__':
                 if i % checkpoint_steps == 0:
                     mean_losses = np.mean(losses)
                     losses = []
-                    train_writer.add_scalar('mean_losses', mean_losses, i)
+                    train_writer.add_scalar('train_valid/mean_losses', mean_losses, i)
                     timespent = (time.time() - t_start) / 60
                     curr_lr = optimizer.param_groups[0]['lr']
                     train_writer.add_scalar('lr', curr_lr, i)
@@ -234,14 +233,12 @@ if __name__ == '__main__':
                 best_valid[1] = mean_fde_valid
 
                 torch.set_grad_enabled(True)
-                train_writer.add_scalar('mean_loss_valid', mean_loss_valid, i)
-                train_writer.add_scalar('mean_ade_valid', mean_ade_valid, i)
-                train_writer.add_scalar('mean_fde_valid', mean_fde_valid, i)
+                train_writer.add_scalar('train_valid/mean_loss_valid', mean_loss_valid, i)
+                train_writer.add_scalar('valid/mean_ade_valid', mean_ade_valid, i)
+                train_writer.add_scalar('valid/mean_fde_valid', mean_fde_valid, i)
                 logger.info('eval phase: epoch: {}, i: {}, loss(avg): {}, ade(avg): {}, fde(avg): {}'.format(epoch_i, i, mean_loss_valid,
                                                                                 mean_ade_valid, mean_fde_valid))
 
-        torch.save(model.state_dict(), f'../../model/{model_name}_final.pth')
-        torch.save(optimizer.state_dict(), f'../../model/{model_name}_optimizer_final.pth')
 
     # test
     if cfg["model_params"]["predict"]:

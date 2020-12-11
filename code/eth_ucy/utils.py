@@ -180,9 +180,8 @@ def multi2single(traj_multi, ground_truth, confidence, mode='best'):
         return traj_multi / 3.0
     elif mode == 'best':
         gt = torch.unsqueeze(ground_truth, 1)
-        avails = avails[:, None, :, None]
         # 求L2距离平方
-        error = torch.sum(((gt - traj_multi) * avails) ** 2, dim=3)
+        error = torch.sum((gt - traj_multi) ** 2, dim=3)
         # 时序轴上求平均
         error = torch.mean(error, dim=2)
         # 模态轴上求最小值
