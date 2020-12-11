@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from pathlib import Path
+import cvae
 import cgan
 import utils
 import dataloader
@@ -35,19 +36,19 @@ cfg = {
         'history_delta_time': 0.25,
         'future_num_frames': 12,
         'model_name': "CGAN",
-        'lr_g': 1e-5,
+        'lr_g': 1e-4,
         'lr_d': 1e-3,
         'checkpoint_path': '',
         'train': True,
         'predict': True,
     },
     'train_data_loader': {
-        'batch_size': 6,
+        'batch_size': 4,
         'shuffle': True,
         'num_workers': 4,
     },
     'valid_data_loader': {
-        'batch_size': 6,
+        'batch_size': 4,
         'shuffle': True,
         'num_workers': 4,
     },
@@ -57,12 +58,14 @@ cfg = {
         'num_workers': 4,
     },
     'train_params': {
-        'epoch': 2,
+        'device': 0,
+        'epoch': 2000,
         'checkpoint_steps': 100,
         'valid_steps': 1,
-        'log_file_path': '../../log/cgan.log',
-        'omega': 1.0,
-        'epsilon': 1.0,
+        'log_file_path': '../../log/train_log/cvgn.log',
+        'tensorboard_path': '../../log/tensorboard/cvgn/',
+        'omega': 0.0001,
+        'epsilon': 0.1,
     }
 }
 
@@ -71,27 +74,27 @@ cfg = {
 def forward_g(scene, his_traj, targets, model_g, model_d, optimizer, scheduler, omega=1.0, epsilon=1.0):
 
     model_g.train()
-    preds, conf, context = model_g(scene, his_traj)
+    preds, conf, context, z_mean, z_var = model_g(scene, his_traj)
     traj_fake = utils.multi2single(preds, targets, conf, mode='best')
     score_fake = model_d(traj_fake.permute(1, 0, 2), context)
-    # 判别loss + nll_loss
+    # 判别loss + nll_loss + vae_loss
     g_loss = utils.g_loss(score_fake)
     nll_loss = utils.pytorch_neg_multi_log_likelihood_batch(targets, preds, conf)
-    min_l2_loss = utils._average_displacement_error(targets, preds, conf, mode='best')
-    #     loss = g_loss + nll_loss * omega + l2_loss * epsilon
-    loss = g_loss + nll_loss * omega + min_l2_loss * epsilon
+    vae_loss, ade_loss = cvae.loss_cvae(targets, preds, conf, z_mean, z_var)
+    #     loss = g_loss + nll_loss * omega + vae_loss * epsilon
+    loss = g_loss + nll_loss * omega + vae_loss * epsilon
     scheduler.step()
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-    return loss, nll_loss, min_l2_loss, preds, conf
+    return loss, nll_loss, vae_loss, ade_loss, preds, conf
 
 
 # 判别器训练
 def forward_d(scene, his_traj, targets, model_g, model_d, optimizer, scheduler):
 
     model_d.train()
-    preds, confidences, context = model_g(scene, his_traj)
+    preds, confidences, context, _, _ = model_g(scene, his_traj)
     traj_fake = utils.multi2single(preds, targets, confidences, mode='best')
     score_fake = model_d(traj_fake.permute(1, 0, 2), context)
     score_real = model_d(targets.permute(1, 0, 2), context)
@@ -104,12 +107,13 @@ def forward_d(scene, his_traj, targets, model_g, model_d, optimizer, scheduler):
 
 
 if __name__ == '__main__':
+    # 训练日志
     logfile = cfg['train_params']['log_file_path']
     logger = logging.getLogger(logfile)
     logger.setLevel(level=logging.INFO)
     sh = logging.StreamHandler()  # 往屏幕上输出
     th = handlers.TimedRotatingFileHandler(filename=logfile, when='D', encoding='utf-8')
-    logger.addHandler(sh)  # 把对象加到logger里
+    # logger.addHandler(sh)  # 把对象加到logger里
     logger.addHandler(th)
 
     # 加载数据集，准备device
@@ -131,14 +135,17 @@ if __name__ == '__main__':
     test_dataloader = DataLoader(test_dataset, shuffle=test_cfg["shuffle"], batch_size=test_cfg["batch_size"],
                                   num_workers=test_cfg["num_workers"], drop_last=True)
 
+    # world frame to camera frame 3*3单应性矩阵
     h_matrix = np.genfromtxt(DIR_INPUT + 'H.txt')
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = cfg['train_params']['device']
+    torch.cuda.set_device(device)
 
-    train_writer = SummaryWriter('../../log/eth/cgan', comment='cvae')
+    tensorboard_file = cfg['train_params']['tensorboard_path']
+    train_writer = SummaryWriter(tensorboard_file)
 
     # 建立模型
-    generator = cgan.generator(cnn_model=cfg["model_params"]["model_cnn"],
+    generator = cvae.CVAE(cnn_model=cfg["model_params"]["model_cnn"],
                       channels=3, cont_dim=256)
     discriminator = cgan.discriminator(h_dim=256, cont_dim=256)
     # load weight if there is a pretrained model
@@ -156,7 +163,7 @@ if __name__ == '__main__':
     optimizer_g = optim.Adam(generator.parameters(), lr=learning_rate_g)
     optimizer_d = optim.Adam(discriminator.parameters(), lr=learning_rate_d)
 
-    scheduler_g = optim.lr_scheduler.StepLR(optimizer_g, step_size=20000, gamma=1.0)
+    scheduler_g = optim.lr_scheduler.StepLR(optimizer_g, step_size=20000, gamma=0.8)
     scheduler_d = optim.lr_scheduler.StepLR(optimizer_d, step_size=2000, gamma=0.8)
     logger.info(f'device {device}')
     torch.backends.cudnn.benchmark = True
@@ -169,8 +176,6 @@ if __name__ == '__main__':
         progress_bar = tqdm(range(1, len(train_dataloader)), mininterval=5.)
         losses_d = []
         losses_g = []
-        losses_nll = []
-        losses_ade = []
         model_name = cfg["model_params"]["model_name"]
         checkpoint_steps = cfg['train_params']['checkpoint_steps']
         valid_steps = cfg['train_params']['valid_steps']
@@ -201,7 +206,7 @@ if __name__ == '__main__':
                 train_writer.add_scalar('train/loss_d', loss_d, i)
 
                 # 生成器训练
-                loss_g, loss_nll, loss_ade, preds, confidences = forward_g(scene.float(), his_traj.float(),
+                loss_g, loss_nll, loss_vae, loss_ade, preds, confidences = forward_g(scene.float(), his_traj.float(),
                                                                            targets.float(), generator, discriminator,
                                                                            optimizer_g, scheduler_g,
                                                                            omega=omega, epsilon=epsilon)
@@ -209,11 +214,11 @@ if __name__ == '__main__':
                 losses_g.append(loss_g)
                 train_writer.add_scalar('train/loss_g', loss_g, i)
                 loss_nll = loss_nll.item()
-                losses_nll.append(loss_nll)
                 train_writer.add_scalar('train_metrics/loss_nll', loss_nll, i)
+                loss_vae = loss_vae.item()
+                train_writer.add_scalar('train_metrics/loss_vae', loss_vae, i)
                 loss_ade = loss_ade.item()
-                losses_ade.append(loss_ade)
-                train_writer.add_scalar('train_metrics/loss_ade', loss_nll, i)
+                train_writer.add_scalar('train_metrics/loss_ade', loss_ade, i)
 
                 i += 1
 
@@ -253,14 +258,14 @@ if __name__ == '__main__':
                     his_traj_valid = data_valid[3].to(device)
                     his_traj_valid = his_traj_valid.permute(1, 0, 2)
                     targets_valid = data_valid[4].to(device)
-                    pred_pixel, conf, context = generator(scene_valid.float(), his_traj_valid.float())
-                    traj_fake_valid = utils.multi2single(pred_pixel, targets_valid, conf, mode='best')
+                    pred_pixel, conf, context, z_mean, z_var = generator(scene_valid.float(), his_traj_valid.float())
+                    traj_fake_valid = utils.multi2single(pred_pixel, targets_valid.float(), conf, mode='best')
                     score_fake = discriminator(traj_fake_valid.permute(1, 0, 2), context)
                     g_loss_valid = utils.g_loss(score_fake)
                     nll_loss_valid = utils.pytorch_neg_multi_log_likelihood_batch(targets_valid, pred_pixel, conf)
-                    min_l2_loss_valid = utils._average_displacement_error(targets_valid, pred_pixel, conf, mode='best')
+                    vae_loss_valid, min_l2_loss_valid = cvae.loss_cvae(targets_valid, pred_pixel, conf, z_mean, z_var)
                     #     loss = g_loss + nll_loss * omega + l2_loss * epsilon
-                    valid_loss = g_loss_valid + nll_loss_valid * omega + min_l2_loss_valid * epsilon
+                    valid_loss = g_loss_valid + nll_loss_valid * omega + vae_loss_valid * epsilon
                     # camera frame to world frame(meter)
                     pred = torch.zeros_like(pred_pixel)
                     for batch_index in range(pred_pixel.shape[0]):
@@ -293,6 +298,7 @@ if __name__ == '__main__':
                 best_valid[1] = mean_fde_valid
 
                 torch.set_grad_enabled(True)
+                generator.train()
                 train_writer.add_scalar('valid/mean_loss_valid', mean_loss_valid, i)
                 train_writer.add_scalar('valid/mean_ade_valid', mean_ade_valid, i)
                 train_writer.add_scalar('valid/mean_fde_valid', mean_fde_valid, i)
@@ -323,7 +329,7 @@ if __name__ == '__main__':
             his_traj_test = data_test[3].to(device)
             his_traj_test = his_traj_test.permute(1, 0, 2)
             targets_test = data_test[4].to(device)
-            pred_pixel_test, conf_test, _ = generator(scene_test.float(), his_traj_test.float())
+            pred_pixel_test, conf_test, _, _, _ = generator(scene_test.float(), his_traj_test.float())
             # camera frame to world frame(meter)
             pred_test = torch.zeros_like(pred_pixel_test)
             for batch_index in range(pred_pixel_test.shape[0]):

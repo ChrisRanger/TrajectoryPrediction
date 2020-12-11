@@ -35,7 +35,7 @@ cfg = {
         'history_delta_time': 0.25,
         'future_num_frames': 12,
         'model_name': "CVAE",
-        'lr': 1e-3,
+        'lr': 2e-5,
         'checkpoint_path': '',
         'train': True,
         'predict': True,
@@ -56,29 +56,34 @@ cfg = {
         'num_workers': 4,
     },
     'train_params': {
-        'epoch': 1,
+        'device': 0,
+        'epoch': 1000,
         'checkpoint_steps': 100,
         'valid_steps': 1,
-        'log_file_path': '../../log/cvae.log',
+        'log_file_path': '../../log/train_log/cvae.log',
+        'tensorboard_path': '../../log/tensorboard/cvae/',
+        'omega': 0.001,
     }
 }
 
 
-def forward(scene, his_traj, targets, model, device, criterion=cvae.loss_cvae, compute_loss=True):
+def forward(scene, his_traj, targets, model, device, criterion=cvae.loss_cvae, omega=1.0):
     # Forward pass
     preds, confidences, context, mean, var = model(scene, his_traj)
     # skip compute loss if we are doing prediction
-    loss, loss_ade = criterion(targets, preds, confidences, mean, var) if compute_loss else 0
-    return loss, loss_ade, preds, confidences
+    loss_vae, loss_ade = criterion(targets, preds, confidences, mean, var)
+    nll_loss = utils.pytorch_neg_multi_log_likelihood_batch(targets, preds, confidences)
+    loss = loss_vae + nll_loss * omega
+    return loss, loss_vae, loss_ade, nll_loss, preds, confidences
 
 
 if __name__ == '__main__':
-    logfile = cfg['log_file_path']
+    logfile = cfg['train_params']['log_file_path']
     logger = logging.getLogger(logfile)
     logger.setLevel(level=logging.INFO)
     sh = logging.StreamHandler()  # 往屏幕上输出
     th = handlers.TimedRotatingFileHandler(filename=logfile, when='D', encoding='utf-8')
-    logger.addHandler(sh)  # 把对象加到logger里
+    # logger.addHandler(sh)  # 把对象加到logger里
     logger.addHandler(th)
 
     # 加载数据集，准备device
@@ -102,10 +107,11 @@ if __name__ == '__main__':
 
     h_matrix = np.genfromtxt(DIR_INPUT + 'H.txt')
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = cfg['train_params']['device']
+    torch.cuda.set_device(device)
 
-
-    train_writer = SummaryWriter('../../log/eth/cvae', comment='cvae')
+    tensorboard_file = cfg['train_params']['tensorboard_path']
+    train_writer = SummaryWriter(tensorboard_file)
 
     # 建立模型
     model = cvae.CVAE(cnn_model=cfg["model_params"]["model_cnn"],
@@ -144,6 +150,7 @@ if __name__ == '__main__':
         t_start = time.time()
         torch.set_grad_enabled(True)
         best_valid = [0., 0.]
+        omega = cfg['train_params']['omega']
         i = 0
         for epoch_i in range(epochs):
 
@@ -160,7 +167,8 @@ if __name__ == '__main__':
                 his_traj = data[3].to(device)
                 his_traj = his_traj.permute(1, 0, 2)
                 targets = data[4].to(device)
-                loss, _, output, _ = forward(scene.float(), his_traj.float(), targets.float(), model, device)
+                loss, _, _, _, output, _ = forward(scene.float(), his_traj.float(), targets.float(),
+                                                   model, device, omega=omega)
                 # Backward pass
                 scheduler.step()
                 optimizer.zero_grad()
@@ -201,8 +209,8 @@ if __name__ == '__main__':
                     his_traj_valid = data_valid[3].to(device)
                     his_traj_valid = his_traj_valid.permute(1, 0, 2)
                     targets_valid = data_valid[4].to(device)
-                    valid_loss, _, pred_pixel, conf = forward(scene_valid.float(), his_traj_valid.float(),
-                                                       targets_valid.float(), model, device)
+                    valid_loss, _, _, _, pred_pixel, conf = forward(scene_valid.float(), his_traj_valid.float(),
+                                                       targets_valid.float(), model, device, omega=omega)
                     # camera frame to world frame(meter)
                     pred = torch.zeros_like(pred_pixel)
                     for batch_index in range(pred_pixel.shape[0]):
@@ -264,8 +272,7 @@ if __name__ == '__main__':
             his_traj_test = data_test[3].to(device)
             his_traj_test = his_traj_test.permute(1, 0, 2)
             targets_test = data_test[4].to(device)
-            _, _, pred_test_pixel, conf_test = forward(scene_test.float(), his_traj_test.float(),
-                                                      targets_test.float(), model, device)
+            pred_test_pixel, conf_test, _, _ = model(scene_test.float(), his_traj_test.float())
             # camera frame to world frame(meter)
             pred_test = torch.zeros_like(pred_test_pixel)
             for batch_index in range(pred_test_pixel.shape[0]):

@@ -167,7 +167,8 @@ def multi2single(traj_multi, ground_truth, confidence, mode='best'):
     # 三种模式： best最接近gt那条; mean求期望; most取概率最大那条，其他方式待补充
     if mode == 'most':
         index = confidence.argmax(dim=1)
-        selected_traj = gt
+        gt = torch.unsqueeze(ground_truth, 1)
+        selected_traj = torch.tensor(gt)
         for i in range(0, ground_truth.shape[0]):
             selected_traj[i] = traj_multi[i][index[i]]
         selected_traj = selected_traj.squeeze(1)

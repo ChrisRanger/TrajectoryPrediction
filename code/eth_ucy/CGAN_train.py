@@ -35,7 +35,7 @@ cfg = {
         'history_delta_time': 0.25,
         'future_num_frames': 12,
         'model_name': "CGAN",
-        'lr_g': 1e-5,
+        'lr_g': 1e-4,
         'lr_d': 1e-3,
         'checkpoint_path': '',
         'train': True,
@@ -57,12 +57,14 @@ cfg = {
         'num_workers': 4,
     },
     'train_params': {
-        'epoch': 2,
+        'device': 0,
+        'epoch': 200,
         'checkpoint_steps': 100,
         'valid_steps': 1,
-        'log_file_path': '../../log/cgan.log',
-        'omega': 1.0,
-        'epsilon': 1.0,
+        'log_file_path': '../../log/train_log/cgan.log',
+        'tensorboard_path': '../../log/tensorboard/cgan/',
+        'omega': 0.0001,
+        'epsilon': 0.1,
     }
 }
 
@@ -74,7 +76,7 @@ def forward_g(scene, his_traj, targets, model_g, model_d, optimizer, scheduler, 
     preds, conf, context = model_g(scene, his_traj)
     traj_fake = utils.multi2single(preds, targets, conf, mode='best')
     score_fake = model_d(traj_fake.permute(1, 0, 2), context)
-    # 判别loss + nll_loss
+    # 判别loss + nll_loss + ade_loss
     g_loss = utils.g_loss(score_fake)
     nll_loss = utils.pytorch_neg_multi_log_likelihood_batch(targets, preds, conf)
     min_l2_loss = utils._average_displacement_error(targets, preds, conf, mode='best')
@@ -109,7 +111,7 @@ if __name__ == '__main__':
     logger.setLevel(level=logging.INFO)
     sh = logging.StreamHandler()  # 往屏幕上输出
     th = handlers.TimedRotatingFileHandler(filename=logfile, when='D', encoding='utf-8')
-    logger.addHandler(sh)  # 把对象加到logger里
+    # logger.addHandler(sh)  # 把对象加到logger里
     logger.addHandler(th)
 
     # 加载数据集，准备device
@@ -133,9 +135,11 @@ if __name__ == '__main__':
 
     h_matrix = np.genfromtxt(DIR_INPUT + 'H.txt')
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = cfg['train_params']['device']
+    torch.cuda.set_device(device)
 
-    train_writer = SummaryWriter('../../log/eth/cgan', comment='cvae')
+    tensorboard_file = cfg['train_params']['tensorboard_path']
+    train_writer = SummaryWriter(tensorboard_file)
 
     # 建立模型
     generator = cgan.generator(cnn_model=cfg["model_params"]["model_cnn"],
@@ -156,7 +160,7 @@ if __name__ == '__main__':
     optimizer_g = optim.Adam(generator.parameters(), lr=learning_rate_g)
     optimizer_d = optim.Adam(discriminator.parameters(), lr=learning_rate_d)
 
-    scheduler_g = optim.lr_scheduler.StepLR(optimizer_g, step_size=20000, gamma=1.0)
+    scheduler_g = optim.lr_scheduler.StepLR(optimizer_g, step_size=20000, gamma=0.8)
     scheduler_d = optim.lr_scheduler.StepLR(optimizer_d, step_size=2000, gamma=0.8)
     logger.info(f'device {device}')
     torch.backends.cudnn.benchmark = True
@@ -169,8 +173,6 @@ if __name__ == '__main__':
         progress_bar = tqdm(range(1, len(train_dataloader)), mininterval=5.)
         losses_d = []
         losses_g = []
-        losses_nll = []
-        losses_ade = []
         model_name = cfg["model_params"]["model_name"]
         checkpoint_steps = cfg['train_params']['checkpoint_steps']
         valid_steps = cfg['train_params']['valid_steps']
@@ -209,11 +211,9 @@ if __name__ == '__main__':
                 losses_g.append(loss_g)
                 train_writer.add_scalar('train/loss_g', loss_g, i)
                 loss_nll = loss_nll.item()
-                losses_nll.append(loss_nll)
                 train_writer.add_scalar('train_metrics/loss_nll', loss_nll, i)
                 loss_ade = loss_ade.item()
-                losses_ade.append(loss_ade)
-                train_writer.add_scalar('train_metrics/loss_ade', loss_nll, i)
+                train_writer.add_scalar('train_metrics/loss_ade', loss_ade, i)
 
                 i += 1
 
@@ -287,12 +287,13 @@ if __name__ == '__main__':
                                   "model_state_dict_d": discriminator.state_dict(),
                                   "optimizer_state_dict_d": optimizer_d.state_dict(),
                                   "epoch": epoch_i}
-                    path_checkpoint = os.path.join('../../model/', 'cgan_model.pt')
+                    path_checkpoint = os.path.join('../../model/', 'cgan_eth_model.pt')
                     torch.save(checkpoint, path_checkpoint)
                 best_valid[0] = mean_ade_valid
                 best_valid[1] = mean_fde_valid
 
                 torch.set_grad_enabled(True)
+                generator.train()
                 train_writer.add_scalar('valid/mean_loss_valid', mean_loss_valid, i)
                 train_writer.add_scalar('valid/mean_ade_valid', mean_ade_valid, i)
                 train_writer.add_scalar('valid/mean_fde_valid', mean_fde_valid, i)
