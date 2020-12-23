@@ -26,7 +26,7 @@ from tqdm import tqdm_notebook
 
 
 class generator(nn.Module):
-    def __init__(self, cnn_model='resnet34', channels=3, traj_dim=256, cont_dim=256, mode=3, v_dim=4):
+    def __init__(self, cnn_model='resnet34', channels=3, traj_dim=256, cont_dim=256, mode=3, v_dim=2):
         super(generator, self).__init__()
         self.Traj_Encoder = basicModel.Trajectory_Encoder(h_dim=traj_dim, v_dim=v_dim)
         self.Cont_Encoder = basicModel.Context_Encoder(cnn_model='resnet34', channels=3, cont_dim=cont_dim)
@@ -36,8 +36,10 @@ class generator(nn.Module):
         self.num_preds = 2 * self.future_len * self.num_modes
         self.gen = nn.Sequential(
             nn.BatchNorm1d(traj_dim + cont_dim),
-            nn.Linear(in_features=traj_dim + cont_dim, out_features=traj_dim + cont_dim),
-            nn.Linear(in_features=traj_dim + cont_dim, out_features=self.num_preds + self.num_modes)
+            nn.Linear(in_features=traj_dim + cont_dim, out_features=512),
+            nn.Linear(in_features=512, out_features=256),
+            nn.Linear(in_features=256, out_features=self.num_preds + self.num_modes),
+            nn.LeakyReLU()
         )
 
     def forward(self, image, traj):

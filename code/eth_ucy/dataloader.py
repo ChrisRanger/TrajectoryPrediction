@@ -22,15 +22,16 @@ class EthSceneDataset(Dataset):
         for path in all_files:
             data = np.load(path, allow_pickle=True)
             self.dataset.append(data)
+            del data
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, item):
         scene = self.dataset[item]['scene']
-        obs_traj = self.dataset[item]['obs_traj']
+        obs_traj = self.dataset[item]['obs_traj'][:, 0:2]
         pred_traj = self.dataset[item]['pred_traj']
-        obs_traj_pixel = self.dataset[item]['obs_traj_pixel']
+        obs_traj_pixel = self.dataset[item]['obs_traj_pixel'][:, 0:2]
         pred_traj_pixel = self.dataset[item]['pred_traj_pixel']
         out = [scene, obs_traj, pred_traj, obs_traj_pixel, pred_traj_pixel]
 

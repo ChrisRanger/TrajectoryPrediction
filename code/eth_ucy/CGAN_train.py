@@ -26,45 +26,45 @@ from logging import handlers
 logging.info(torch.__version__)
 
 cfg = {
-    'data_path': '/datasets/ETH/seq_eth/',
+    'data_path': '/hd/yx/WSY/UCY/zara01/',
     'model_params': {
-        'model_cnn': "resnet34",
+        'model_cnn': "resnet18",
         'scene_weight': 640,
         'scene_height': 480,
         'history_num_frames': 8,
         'history_delta_time': 0.25,
         'future_num_frames': 12,
         'model_name': "CGAN",
-        'lr_g': 1e-4,
-        'lr_d': 1e-3,
+        'lr_g': 1e-3,
+        'lr_d': 1e-4,
         'checkpoint_path': '',
         'train': True,
         'predict': True,
     },
     'train_data_loader': {
-        'batch_size': 6,
+        'batch_size': 32,
         'shuffle': True,
         'num_workers': 4,
     },
     'valid_data_loader': {
-        'batch_size': 6,
+        'batch_size': 32,
         'shuffle': True,
         'num_workers': 4,
     },
     'test_data_loader': {
-        'batch_size': 4,
+        'batch_size': 32,
         'shuffle': False,
         'num_workers': 4,
     },
     'train_params': {
         'device': 0,
-        'epoch': 200,
+        'epoch': 2000,
         'checkpoint_steps': 100,
-        'valid_steps': 1,
-        'log_file_path': '../../log/train_log/cgan.log',
-        'tensorboard_path': '../../log/tensorboard/cgan/',
-        'omega': 0.0001,
-        'epsilon': 0.1,
+        'valid_steps': 2,
+        'log_file_path': '../../log/train_log/cgan_zara01.log',
+        'tensorboard_path': '../../log/tensorboard/cgan_zara01/',
+        'omega': 0.0,
+        'epsilon': 1,
     }
 }
 
@@ -78,9 +78,10 @@ def forward_g(scene, his_traj, targets, model_g, model_d, optimizer, scheduler, 
     score_fake = model_d(traj_fake.permute(1, 0, 2), context)
     # 判别loss + nll_loss + ade_loss
     g_loss = utils.g_loss(score_fake)
-    nll_loss = utils.pytorch_neg_multi_log_likelihood_batch(targets, preds, conf)
+    # nll_loss = utils.pytorch_neg_multi_log_likelihood_batch(targets, preds, conf)
     min_l2_loss = utils._average_displacement_error(targets, preds, conf, mode='best')
     #     loss = g_loss + nll_loss * omega + l2_loss * epsilon
+    nll_loss = 0.0
     loss = g_loss + nll_loss * omega + min_l2_loss * epsilon
     scheduler.step()
     optimizer.zero_grad()
@@ -143,7 +144,7 @@ if __name__ == '__main__':
 
     # 建立模型
     generator = cgan.generator(cnn_model=cfg["model_params"]["model_cnn"],
-                      channels=3, cont_dim=256)
+                      channels=3, cont_dim=256, v_dim=2)
     discriminator = cgan.discriminator(h_dim=256, cont_dim=256)
     # load weight if there is a pretrained model
     checkpoint_path = cfg["model_params"]["checkpoint_path"]
@@ -160,7 +161,7 @@ if __name__ == '__main__':
     optimizer_g = optim.Adam(generator.parameters(), lr=learning_rate_g)
     optimizer_d = optim.Adam(discriminator.parameters(), lr=learning_rate_d)
 
-    scheduler_g = optim.lr_scheduler.StepLR(optimizer_g, step_size=20000, gamma=0.8)
+    scheduler_g = optim.lr_scheduler.StepLR(optimizer_g, step_size=3000, gamma=0.5)
     scheduler_d = optim.lr_scheduler.StepLR(optimizer_d, step_size=2000, gamma=0.8)
     logger.info(f'device {device}')
     torch.backends.cudnn.benchmark = True
@@ -210,8 +211,8 @@ if __name__ == '__main__':
                 loss_g = loss_g.item()
                 losses_g.append(loss_g)
                 train_writer.add_scalar('train/loss_g', loss_g, i)
-                loss_nll = loss_nll.item()
-                train_writer.add_scalar('train_metrics/loss_nll', loss_nll, i)
+                # loss_nll = loss_nll.item()
+                # train_writer.add_scalar('train_metrics/loss_nll', loss_nll, i)
                 loss_ade = loss_ade.item()
                 train_writer.add_scalar('train_metrics/loss_ade', loss_ade, i)
 
@@ -257,7 +258,8 @@ if __name__ == '__main__':
                     traj_fake_valid = utils.multi2single(pred_pixel, targets_valid.float(), conf, mode='best')
                     score_fake = discriminator(traj_fake_valid.permute(1, 0, 2), context)
                     g_loss_valid = utils.g_loss(score_fake)
-                    nll_loss_valid = utils.pytorch_neg_multi_log_likelihood_batch(targets_valid, pred_pixel, conf)
+                    # nll_loss_valid = utils.pytorch_neg_multi_log_likelihood_batch(targets_valid, pred_pixel, conf)
+                    nll_loss_valid = 0.0
                     min_l2_loss_valid = utils._average_displacement_error(targets_valid, pred_pixel, conf, mode='best')
                     #     loss = g_loss + nll_loss * omega + l2_loss * epsilon
                     valid_loss = g_loss_valid + nll_loss_valid * omega + min_l2_loss_valid * epsilon
@@ -287,7 +289,7 @@ if __name__ == '__main__':
                                   "model_state_dict_d": discriminator.state_dict(),
                                   "optimizer_state_dict_d": optimizer_d.state_dict(),
                                   "epoch": epoch_i}
-                    path_checkpoint = os.path.join('../../model/', 'cgan_eth_model.pt')
+                    path_checkpoint = os.path.join('../../model/', 'cgan_zara01_model.pt')
                     torch.save(checkpoint, path_checkpoint)
                 best_valid[0] = mean_ade_valid
                 best_valid[1] = mean_fde_valid

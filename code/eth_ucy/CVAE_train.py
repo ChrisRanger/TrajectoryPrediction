@@ -26,54 +26,57 @@ from logging import handlers
 logging.info(torch.__version__)
 
 cfg = {
-    'data_path': '/datasets/ETH/seq_eth/',
+    'data_path': '/hd/yx/WSY/UCY/zara01/',
     'model_params': {
-        'model_cnn': "resnet34",
+        'model_cnn': "resnet18",
         'scene_weight': 640,
         'scene_height': 480,
         'history_num_frames': 8,
         'history_delta_time': 0.25,
         'future_num_frames': 12,
         'model_name': "CVAE",
-        'lr': 2e-5,
+        'lr': 1e-3,
         'checkpoint_path': '',
         'train': True,
         'predict': True,
     },
     'train_data_loader': {
-        'batch_size': 6,
+        'batch_size': 40,
         'shuffle': True,
         'num_workers': 4,
     },
     'valid_data_loader': {
-        'batch_size': 6,
+        'batch_size': 40,
         'shuffle': True,
         'num_workers': 4,
     },
     'test_data_loader': {
-        'batch_size': 4,
+        'batch_size': 40,
         'shuffle': False,
         'num_workers': 4,
+        'sample_nums': 20,
     },
     'train_params': {
         'device': 0,
-        'epoch': 1000,
+        'epoch': 3000,
         'checkpoint_steps': 100,
-        'valid_steps': 1,
-        'log_file_path': '../../log/train_log/cvae.log',
-        'tensorboard_path': '../../log/tensorboard/cvae/',
-        'omega': 0.001,
+        'valid_steps': 2,
+        'log_file_path': '../../log/train_log/cvae_zara01.log',
+        'tensorboard_path': '../../log/tensorboard/cvae_zara01/',
+        'omega': 0.00,
     }
 }
 
 
-def forward(scene, his_traj, targets, model, device, criterion=cvae.loss_cvae, omega=1.0):
+def forward(scene, his_traj, targets, model, device, criterion=cvae.loss_cvae, omega=0.0):
     # Forward pass
     preds, confidences, context, mean, var = model(scene, his_traj)
     # skip compute loss if we are doing prediction
     loss_vae, loss_ade = criterion(targets, preds, confidences, mean, var)
-    nll_loss = utils.pytorch_neg_multi_log_likelihood_batch(targets, preds, confidences)
-    loss = loss_vae + nll_loss * omega
+    # nll_loss = utils.pytorch_neg_multi_log_likelihood_batch(targets, preds, confidences)
+    # loss = loss_vae + nll_loss * omega
+    nll_loss = 0.0
+    loss = loss_vae
     return loss, loss_vae, loss_ade, nll_loss, preds, confidences
 
 
@@ -127,7 +130,7 @@ if __name__ == '__main__':
     model.to(device)
     learning_rate = cfg["model_params"]["lr"]
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=2000, gamma=0.8)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5000, gamma=0.8)
     logger.info(f'device {device}')
     # raster_size = (640, 480)
     # summary(model, input_size=raster_size)
@@ -235,7 +238,7 @@ if __name__ == '__main__':
                     checkpoint = {"model_state_dict": model.state_dict(),
                                   "optimizer_state_dict": optimizer.state_dict(),
                                   "epoch": epoch_i}
-                    path_checkpoint = os.path.join('../../model/', 'cvae_model.pt')
+                    path_checkpoint = os.path.join('../../model/', 'cvae_zara01_model.pt')
                     torch.save(checkpoint, path_checkpoint)
                 best_valid[0] = mean_ade_valid
                 best_valid[1] = mean_fde_valid
@@ -260,6 +263,7 @@ if __name__ == '__main__':
         model.eval()
         torch.set_grad_enabled(False)
         logging.info('test phase')
+        k = test_cfg['sample_nums']
 
         for _ in progress_bar:
             try:
@@ -272,21 +276,24 @@ if __name__ == '__main__':
             his_traj_test = data_test[3].to(device)
             his_traj_test = his_traj_test.permute(1, 0, 2)
             targets_test = data_test[4].to(device)
-            pred_test_pixel, conf_test, _, _ = model(scene_test.float(), his_traj_test.float())
-            # camera frame to world frame(meter)
-            pred_test = torch.zeros_like(pred_test_pixel)
-            for batch_index in range(pred_test_pixel.shape[0]):
-                for modality in range(pred_test_pixel.shape[1]):
-                    for pos_index in range(pred_test_pixel.shape[2]):
-                        pred_test[batch_index][modality][pos_index] = torch.from_numpy(scripts.project(h_matrix,
-                                    pred_test_pixel[batch_index][modality][pos_index].cpu()))
-            # calculate metrics in world frame
-            test_ade = utils._average_displacement_error(data_test[2].to(device), pred_test, conf_test, mode='best')
-            test_fde = utils._final_displacement_error(data_test[2].to(device), pred_test, conf_test, mode='best')
-            test_ade = test_ade.item()
-            test_fde = test_fde.item()
-            test_ades.append(test_ade)
-            test_fdes.append(test_fde)
+            min_ade_test = 2.0
+            min_fde_test = 2.0
+            for sample_cnt in range(k):
+                pred_test_pixel, conf_test, _, _, _ = model(scene_test.float(), his_traj_test.float())
+                # camera frame to world frame(meter)
+                pred_test = torch.zeros_like(pred_test_pixel)
+                for batch_index in range(pred_test_pixel.shape[0]):
+                    for modality in range(pred_test_pixel.shape[1]):
+                        for pos_index in range(pred_test_pixel.shape[2]):
+                            pred_test[batch_index][modality][pos_index] = torch.from_numpy(scripts.project(h_matrix,
+                                        pred_test_pixel[batch_index][modality][pos_index].cpu()))
+                # calculate metrics in world frame
+                sample_ade = utils._average_displacement_error(data_test[2].to(device), pred_test, conf_test, mode='best')
+                sample_fde = utils._final_displacement_error(data_test[2].to(device), pred_test, conf_test, mode='best')
+                min_ade_test = min(min_ade_test, sample_ade.item())
+                min_fde_test = min(min_fde_test, sample_fde.item())
+            test_ades.append(min_ade_test)
+            test_fdes.append(min_fde_test)
         mean_ade_test = np.mean(test_ades)
         mean_fde_test = np.mean(test_fdes)
         logger.info('test phase: ade(avg): {}, fde(avg): {}'.format(mean_ade_test, mean_fde_test))

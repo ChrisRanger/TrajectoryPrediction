@@ -24,10 +24,10 @@ class Trajectory:
 
 if __name__ == '__main__':
 
-    dataset = '/datasets/UCY/students03/'
+    dataset = '/hd/yx/WSY/UCY/zara02'
     annot_file = dataset + '/obsmat.txt'
-    annot_file_out = dataset + '/obsmat_px1.txt'
-    H_iw = np.loadtxt(dataset + '/H.txt')
+    annot_file_out = dataset + '/obsmat_px.txt'
+    H_iw = np.loadtxt(dataset + '/H-old.txt')
 
     in_file = open(annot_file, 'r')
     out_file = open(annot_file_out, 'w')

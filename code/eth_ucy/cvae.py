@@ -49,8 +49,10 @@ class CVAE(nn.Module):
         self.num_modes = mode_dim
         self.decoder_net = nn.Sequential(
             nn.BatchNorm1d(latent_dim + cont_dim),
-            nn.Linear(in_features=latent_dim + cont_dim, out_features=2048),
-            nn.Linear(in_features=2048, out_features=self.num_preds+mode_dim),
+            nn.Linear(in_features=latent_dim + cont_dim, out_features=512),
+            nn.Linear(in_features=512, out_features=256),
+            nn.Linear(in_features=256, out_features=self.num_preds+mode_dim),
+            nn.LeakyReLU()
         )
 
     def encoder(self, image, traj):

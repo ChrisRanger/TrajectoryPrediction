@@ -30,20 +30,20 @@ cfg = {
         'heigth': 576,
         },
     'univ': {
-        'data_path': '/datasets/UCY/students03/',
-        'scene_map': '/datasets/UCY/students03/map.png',
+        'data_path': '/hd/yx/WSY/UCY/students03/',
+        'scene_map': '/hd/yx/WSY/UCY/students03/map.png',
         'width': 720,
         'heigth': 576,
         },
     'zara1': {
-        'data_path': '/datasets/UCY/zara01/',
-        'scene_map': '/datasets/UCY/zara01/map.png',
+        'data_path': '/hd/yx/WSY/UCY/zara01/',
+        'scene_map': '/hd/yx/WSY/UCY/zara01/map.png',
         'width': 720,
         'heigth': 576,
         },
     'zara2': {
-        'data_path': '/datasets/UCY/zara02/',
-        'scene_map': '/datasets/UCY/zara02/map.png',
+        'data_path': '/hd/yx/WSY/UCY/zara02/',
+        'scene_map': '/hd/yx/WSY/UCY/zara02/map.png',
         'width': 720,
         'heigth': 576,
         },
@@ -176,7 +176,7 @@ if __name__ == "__main__":
     fileName = os.path.join(dataset['data_path'] + '/processed', all_data[i])
     if num < num_all_data * 0.7:
       copy2(fileName, trainDir)
-    elif num >= num_all_data * 0.7 and num < num_all_data * 0.9:
+    elif num >= num_all_data * 0.7 and num < num_all_data * 0.8:
       copy2(fileName, validDir)
     else:
       copy2(fileName, testDir)

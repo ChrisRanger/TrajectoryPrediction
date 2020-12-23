@@ -27,45 +27,46 @@ from logging import handlers
 logging.info(torch.__version__)
 
 cfg = {
-    'data_path': '/datasets/ETH/seq_eth/',
+    'data_path': '/hd/yx/WSY/UCY/students03/',
     'model_params': {
-        'model_cnn': "resnet34",
+        'model_cnn': "resnet18",
         'scene_weight': 640,
         'scene_height': 480,
         'history_num_frames': 8,
         'history_delta_time': 0.25,
         'future_num_frames': 12,
-        'model_name': "CGAN",
-        'lr_g': 1e-4,
-        'lr_d': 1e-3,
+        'model_name': "CVGN",
+        'lr_g': 1e-3,
+        'lr_d': 1e-4,
         'checkpoint_path': '',
         'train': True,
         'predict': True,
     },
     'train_data_loader': {
-        'batch_size': 4,
+        'batch_size': 40,
         'shuffle': True,
         'num_workers': 4,
     },
     'valid_data_loader': {
-        'batch_size': 4,
+        'batch_size': 40,
         'shuffle': True,
         'num_workers': 4,
     },
     'test_data_loader': {
-        'batch_size': 4,
+        'batch_size': 40,
         'shuffle': False,
         'num_workers': 4,
+        'sample_nums': 20,
     },
     'train_params': {
-        'device': 0,
+        'device': 1,
         'epoch': 2000,
         'checkpoint_steps': 100,
-        'valid_steps': 1,
-        'log_file_path': '../../log/train_log/cvgn.log',
-        'tensorboard_path': '../../log/tensorboard/cvgn/',
-        'omega': 0.0001,
-        'epsilon': 0.1,
+        'valid_steps': 2,
+        'log_file_path': '../../log/train_log/cvgn_univ.log',
+        'tensorboard_path': '../../log/tensorboard/cvgn_univ/',
+        'omega': 0.0,
+        'epsilon': 1.0,
     }
 }
 
@@ -79,15 +80,16 @@ def forward_g(scene, his_traj, targets, model_g, model_d, optimizer, scheduler, 
     score_fake = model_d(traj_fake.permute(1, 0, 2), context)
     # 判别loss + nll_loss + vae_loss
     g_loss = utils.g_loss(score_fake)
-    nll_loss = utils.pytorch_neg_multi_log_likelihood_batch(targets, preds, conf)
+    # nll_loss = utils.pytorch_neg_multi_log_likelihood_batch(targets, preds, conf)
     vae_loss, ade_loss = cvae.loss_cvae(targets, preds, conf, z_mean, z_var)
     #     loss = g_loss + nll_loss * omega + vae_loss * epsilon
-    loss = g_loss + nll_loss * omega + vae_loss * epsilon
+    # loss = g_loss + nll_loss * omega + vae_loss * epsilon
+    loss = g_loss + vae_loss * epsilon
     scheduler.step()
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-    return loss, nll_loss, vae_loss, ade_loss, preds, conf
+    return loss, vae_loss, ade_loss, preds, conf
 
 
 # 判别器训练
@@ -146,7 +148,7 @@ if __name__ == '__main__':
 
     # 建立模型
     generator = cvae.CVAE(cnn_model=cfg["model_params"]["model_cnn"],
-                      channels=3, cont_dim=256)
+                      channels=3, cont_dim=256, v_dim=2)
     discriminator = cgan.discriminator(h_dim=256, cont_dim=256)
     # load weight if there is a pretrained model
     checkpoint_path = cfg["model_params"]["checkpoint_path"]
@@ -163,8 +165,8 @@ if __name__ == '__main__':
     optimizer_g = optim.Adam(generator.parameters(), lr=learning_rate_g)
     optimizer_d = optim.Adam(discriminator.parameters(), lr=learning_rate_d)
 
-    scheduler_g = optim.lr_scheduler.StepLR(optimizer_g, step_size=20000, gamma=0.8)
-    scheduler_d = optim.lr_scheduler.StepLR(optimizer_d, step_size=2000, gamma=0.8)
+    scheduler_g = optim.lr_scheduler.StepLR(optimizer_g, step_size=3000, gamma=0.5)
+    scheduler_d = optim.lr_scheduler.StepLR(optimizer_d, step_size=5000, gamma=0.8)
     logger.info(f'device {device}')
     torch.backends.cudnn.benchmark = True
 
@@ -206,15 +208,15 @@ if __name__ == '__main__':
                 train_writer.add_scalar('train/loss_d', loss_d, i)
 
                 # 生成器训练
-                loss_g, loss_nll, loss_vae, loss_ade, preds, confidences = forward_g(scene.float(), his_traj.float(),
+                loss_g, loss_vae, loss_ade, preds, confidences = forward_g(scene.float(), his_traj.float(),
                                                                            targets.float(), generator, discriminator,
                                                                            optimizer_g, scheduler_g,
                                                                            omega=omega, epsilon=epsilon)
                 loss_g = loss_g.item()
                 losses_g.append(loss_g)
                 train_writer.add_scalar('train/loss_g', loss_g, i)
-                loss_nll = loss_nll.item()
-                train_writer.add_scalar('train_metrics/loss_nll', loss_nll, i)
+                # loss_nll = loss_nll.item()
+                # train_writer.add_scalar('train_metrics/loss_nll', loss_nll, i)
                 loss_vae = loss_vae.item()
                 train_writer.add_scalar('train_metrics/loss_vae', loss_vae, i)
                 loss_ade = loss_ade.item()
@@ -262,10 +264,11 @@ if __name__ == '__main__':
                     traj_fake_valid = utils.multi2single(pred_pixel, targets_valid.float(), conf, mode='best')
                     score_fake = discriminator(traj_fake_valid.permute(1, 0, 2), context)
                     g_loss_valid = utils.g_loss(score_fake)
-                    nll_loss_valid = utils.pytorch_neg_multi_log_likelihood_batch(targets_valid, pred_pixel, conf)
+                    # nll_loss_valid = utils.pytorch_neg_multi_log_likelihood_batch(targets_valid, pred_pixel, conf)
                     vae_loss_valid, min_l2_loss_valid = cvae.loss_cvae(targets_valid, pred_pixel, conf, z_mean, z_var)
                     #     loss = g_loss + nll_loss * omega + l2_loss * epsilon
-                    valid_loss = g_loss_valid + nll_loss_valid * omega + vae_loss_valid * epsilon
+                    # valid_loss = g_loss_valid + nll_loss_valid * omega + vae_loss_valid * epsilon
+                    valid_loss = g_loss_valid + vae_loss_valid * epsilon
                     # camera frame to world frame(meter)
                     pred = torch.zeros_like(pred_pixel)
                     for batch_index in range(pred_pixel.shape[0]):
@@ -292,7 +295,7 @@ if __name__ == '__main__':
                                   "model_state_dict_d": discriminator.state_dict(),
                                   "optimizer_state_dict_d": optimizer_d.state_dict(),
                                   "epoch": epoch_i}
-                    path_checkpoint = os.path.join('../../model/', 'cgan_model.pt')
+                    path_checkpoint = os.path.join('../../model/', 'cvgn_univ_model.pt')
                     torch.save(checkpoint, path_checkpoint)
                 best_valid[0] = mean_ade_valid
                 best_valid[1] = mean_fde_valid
@@ -317,6 +320,7 @@ if __name__ == '__main__':
         generator.eval()
         torch.set_grad_enabled(False)
         logging.info('test phase')
+        k = test_cfg['sample_nums']
 
         for _ in progress_bar:
             try:
@@ -329,21 +333,24 @@ if __name__ == '__main__':
             his_traj_test = data_test[3].to(device)
             his_traj_test = his_traj_test.permute(1, 0, 2)
             targets_test = data_test[4].to(device)
-            pred_pixel_test, conf_test, _, _, _ = generator(scene_test.float(), his_traj_test.float())
-            # camera frame to world frame(meter)
-            pred_test = torch.zeros_like(pred_pixel_test)
-            for batch_index in range(pred_pixel_test.shape[0]):
-                for modality in range(pred_pixel_test.shape[1]):
-                    for pos_index in range(pred_pixel_test.shape[2]):
-                        pred_test[batch_index][modality][pos_index] = torch.from_numpy(scripts.project(h_matrix,
-                                    pred_pixel_test[batch_index][modality][pos_index].cpu()))
-            # calculate metrics in world frame
-            test_ade = utils._average_displacement_error(data_test[2].to(device), pred_test, conf_test, mode='best')
-            test_fde = utils._final_displacement_error(data_test[2].to(device), pred_test, conf_test, mode='best')
-            test_ade = test_ade.item()
-            test_fde = test_fde.item()
-            test_ades.append(test_ade)
-            test_fdes.append(test_fde)
+            min_ade_test = 2.0
+            min_fde_test = 2.0
+            for sample_cnt in range(k):
+                pred_pixel_test, conf_test, _, _, _ = generator(scene_test.float(), his_traj_test.float())
+                # camera frame to world frame(meter)
+                pred_test = torch.zeros_like(pred_pixel_test)
+                for batch_index in range(pred_pixel_test.shape[0]):
+                    for modality in range(pred_pixel_test.shape[1]):
+                        for pos_index in range(pred_pixel_test.shape[2]):
+                            pred_test[batch_index][modality][pos_index] = torch.from_numpy(scripts.project(h_matrix,
+                                        pred_pixel_test[batch_index][modality][pos_index].cpu()))
+                # calculate metrics in world frame
+                sample_ade = utils._average_displacement_error(data_test[2].to(device), pred_test, conf_test, mode='best')
+                sample_fde = utils._final_displacement_error(data_test[2].to(device), pred_test, conf_test, mode='best')
+                min_ade_test = min(min_ade_test, sample_ade.item())
+                min_fde_test = min(min_fde_test, sample_fde.item())
+            test_ades.append(min_ade_test)
+            test_fdes.append(min_fde_test)
         mean_ade_test = np.mean(test_ades)
         mean_fde_test = np.mean(test_fdes)
         logger.info('test phase: ade(avg): {}, fde(avg): {}'.format(mean_ade_test, mean_fde_test))
